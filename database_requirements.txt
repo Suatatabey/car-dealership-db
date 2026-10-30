@@ -1,0 +1,119 @@
+Car Dealership Management System - Database Requirements
+
+1. Purpose
+The database supports the day-to-day operations of a car dealership. It stores consistent, auditable information about:
+  - the vehicle inventory (manufacturers, models and individual cars)
+  - customers and employees
+  - car sales and the payments made towards them
+  - the service workshop (service records, assigned staff and parts used)
+
+Data integrity is enforced at database level through primary and foreign keys, unique and check constraints, stored procedures and triggers. The same model is implemented on two platforms: Oracle (PL/SQL) and Microsoft SQL Server (T-SQL).
+
+2. Scope
+In scope:
+  - inventory management: cars grouped by manufacturer and model, each with a VIN, price, mileage and status
+  - customer and employee records, including employment periods
+  - sales lifecycle tracking through sale statuses
+  - payment recording, including multiple partial payments per sale
+  - service and maintenance history: service type, labor cost, assigned employees and parts used
+  - reporting: monthly sales and service revenue
+
+Out of scope:
+  - user accounts, roles and access control
+  - car financing contracts, insurance and warranties
+  - trade-ins, discounts and loyalty programs
+  - parts stock levels and supplier ordering
+
+3. Entities
+  - Manufacturer: car brand and its country of origin
+  - CarModel: model name and body type, belonging to one manufacturer
+  - Car: a single physical vehicle in the inventory
+  - Customer: a person who buys a car or brings a car in for service
+  - Employee: a member of staff who handles sales and service work
+  - Sale: the sale of one car to one customer, handled by one employee
+  - SaleStatus: lookup of sale states (PENDING, ON_HOLD, COMPLETED, CANCELLED, REFUNDED)
+  - Payment: a payment made towards a sale
+  - PaymentMethod: lookup of payment methods (CASH, CREDIT_CARD, DEBIT_CARD, BANK_TRANSFER, FINANCING)
+  - ServiceRecord: a single service visit for a car
+  - ServiceType: lookup of service types (e.g. OIL_CHANGE, BRAKE_SERVICE, GENERAL_INSPECTION)
+  - ServiceEmployee: assignment of an employee to a service record, with their role
+  - Part: a spare part with its part number and current price
+  - PartsUsed: a part used during a service, with quantity and the price charged at that time
+
+4. Relationships
+  - A manufacturer produces one or more car models; each car model belongs to exactly one manufacturer.
+  - Each car is of exactly one car model; a car model can have many cars.
+  - A sale links exactly one car, one customer and one employee, and has exactly one sale status.
+  - A customer and an employee can each be part of many sales; a car can appear in several sales over time (e.g. after a cancellation).
+  - A sale can have zero or more payments; each payment uses exactly one payment method.
+  - A service record belongs to exactly one car and one customer and has exactly one service type.
+  - A service record can have many employees assigned (many-to-many via ServiceEmployee).
+  - A service record can use many parts, and a part can be used in many services (many-to-many via PartsUsed).
+
+5. Data Integrity Requirements
+5.1 Keys and Referential Integrity
+  - Every table has a primary key; identifiers are generated automatically (IDENTITY).
+  - All foreign keys must reference existing parent rows.
+  - Master data referenced by sales, payments or service records cannot be deleted, so that history is preserved.
+
+5.2 Uniqueness
+  - Car VIN, customer email, employee email and part number are unique.
+  - A model name is unique within its manufacturer.
+  - Lookup names (sale status, payment method, service type) are unique.
+  - The same part appears at most once per service record (quantity is stored instead).
+  - The same employee is assigned at most once per service record.
+
+5.3 Domain Constraints
+  - Car status is one of: AVAILABLE, RESERVED, SOLD, IN_SERVICE.
+  - Car year is between 1886 and 2100; mileage, when known, is >= 0.
+  - Car list price, sale price and payment amount must be > 0.
+  - Labor cost, part price and unit price at service must be >= 0; part quantity must be > 0.
+  - An employee's end of employment date, when set, cannot be earlier than the start date.
+
+6. Business Rules
+6.1 Sale Rules
+  - A new sale must start with the status PENDING or ON_HOLD.
+  - A sale cannot be created for a car that is SOLD or IN_SERVICE.
+  - The car of a COMPLETED sale cannot be changed.
+  - A sale can be set to COMPLETED only when the total paid equals the sale price.
+
+6.2 Car Status Synchronization
+  - While a sale is PENDING or ON_HOLD, the car is RESERVED.
+  - When a sale becomes COMPLETED, the car becomes SOLD.
+  - When a sale is CANCELLED or REFUNDED, the car returns to AVAILABLE, unless it has another open sale.
+  Implementation: row-level sale trigger (Oracle: trg_sale_biud, SQL Server: trg_sale_aiu).
+
+6.3 Payment Rules
+  - Each payment must reference an existing sale and payment method.
+  - Partial payments are allowed; a sale can have several payments.
+  - The total of all payments for a sale must never exceed the sale price.
+  - When the total paid reaches the sale price, the sale is automatically marked COMPLETED.
+  Implementation: payment trigger (Oracle: compound trigger trg_payment_compound, SQL Server: trg_payment_aiu).
+
+6.4 Sale Finalization
+  - A sale can be finalized on request; the database checks that it is fully paid, then sets the sale to COMPLETED and the car to SOLD.
+  - Finalizing an already completed sale has no effect and returns an informative message.
+  Implementation: stored procedure (Oracle: sp_finalize_sale, SQL Server: usp_FinalizeSale).
+
+6.5 Service Rules
+  - Each service record must reference an existing car, customer and service type.
+  - The cost of a service is its labor cost plus the sum of (quantity x unit price at service) for all parts used.
+  - The price of a part is stored at the time of service, so later price changes do not alter past service costs.
+
+7. Reporting Requirements
+The database must support the following queries:
+  1. Available cars with manufacturer and model details (inventory listing).
+  2. Sales history with customer, employee, car and sale status.
+  3. Total payments per sale and the remaining balance (paid vs. sale price).
+  4. Top customers by total spending (completed sales and payments).
+  5. Monthly KPIs: completed sales revenue and service revenue (labor + parts).
+     Implementation: cursor-based stored procedure (Oracle: sp_monthly_kpis, SQL Server: usp_MonthlyKpis).
+  6. Service records with service type, assigned employees and a breakdown of parts used.
+  7. Cars that currently cannot be sold (IN_SERVICE or SOLD) and the reason.
+  8. Service workload per employee (number of service records each employee took part in).
+
+8. Assumptions
+  - A car is sold to one customer at a time; earlier cancelled or refunded sales remain stored for history.
+  - Sales, payments and service records are never deleted; they are kept for auditing and reporting.
+  - Lookup values (sale statuses, payment methods, service types) are loaded with the seed data.
+  - All monetary values are stored in a single currency.
